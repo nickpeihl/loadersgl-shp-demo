@@ -1,9 +1,35 @@
 import {
   _BrowserFileSystem as BrowserFileSystem,
-  load,
+  loadInBatches,
 } from "@loaders.gl/core";
 import { ShapefileLoader } from "@loaders.gl/shapefile";
 import * as dragDrop from "drag-drop";
+
+async function convert(shapefiles: Map<string, Map<string, File>>) {
+  for (const shapefile of shapefiles.values()) {
+    if (!shapefile.has("shp")) {
+      throw Error("Missing .shp file");
+    }
+    const fileSystem = new BrowserFileSystem(Array.from(shapefile.values()));
+    const { fetch } = fileSystem;
+    const batches = await loadInBatches(
+      shapefile.get("shp").name,
+      ShapefileLoader,
+      {
+        fetch,
+        // Reproject shapefiles to WGS84
+        gis: { reproject: true, _targetCrs: "EPSG:4326" },
+        // Only parse the X & Y coordinates. Other coords not supported by Elasticsearch.
+        shp: { _maxDimensions: 2 },
+        // Don't log the metadata, only the geo data
+        metadata: false,
+      }
+    );
+    for await (const batch of batches) {
+      console.log(batch);
+    }
+  }
+}
 
 dragDrop("#dropTarget", (files) => {
   var count = files.length;
@@ -27,16 +53,5 @@ dragDrop("#dropTarget", (files) => {
     }
   }
 
-  for (const shp of shps.values()) {
-    if (!shp.has("shp")) {
-      throw Error("Missing .shp file");
-    }
-    const fileSystem = new BrowserFileSystem(Array.from(shp.values()));
-    const { fetch } = fileSystem;
-    load(shp.get("shp").name, ShapefileLoader, {
-      fetch,
-      gis: { reproject: true, _targetCrs: "EPSG:4326" },
-      metadata: true,
-    }).then((data) => console.log(data));
-  }
+  convert(shps);
 });
